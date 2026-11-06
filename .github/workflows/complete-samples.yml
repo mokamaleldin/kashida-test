@@ -1,0 +1,39 @@
+name: Complete remaining Telegram samples
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: five-source-samples
+  cancel-in-progress: false
+jobs:
+  complete:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Complete remaining source samples'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-sample-results
+          path: previous
+          run-id: 42186632536
+          github-token: ${{ github.token }}
+      - name: Complete three source samples without Facebook calls
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python complete_samples.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remaining-source-results
+          path: data/completion_status.json
+          if-no-files-found: ignore
+          retention-days: 3

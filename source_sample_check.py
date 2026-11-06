@@ -8,7 +8,8 @@ def latest_for_source(posts,source_id):
 
 def deliver_samples(client,sources,posts,lookback_minutes=60):
     results=[];since=now()-dt.timedelta(minutes=lookback_minutes)
-    for source in sources[:5]:
+    for index,source in enumerate(sources[:5]):
+        if index:time.sleep(1.3)
         post=latest_for_source(posts,source['id'])
         item={'source_id':source['id'],'source_name':source['name']}
         try:
@@ -26,8 +27,8 @@ def deliver_samples(client,sources,posts,lookback_minutes=60):
             entities=result.get('caption_entities',result.get('entities',[]));item['bold_entities']=sum(x.get('type')=='bold' for x in entities)
             item['original_link_rendered']=any(x.get('type')=='text_link' for x in entities)
             if post is not None:item['display_published_at']=format_timestamp(post.get('published_at'))
-        except ProbeError:
-            item['status']='delivery_unknown_or_rejected';results.append(item);break
+        except ProbeError as exc:
+            item['status']='delivery_unknown_or_rejected';item['http_status']=getattr(exc,'status',None);item['error']=str(exc);results.append(item);break
         results.append(item)
     return results
 
@@ -42,6 +43,7 @@ def main():
     report['telegram_messages_sent']=sum(x['status'] in ['sample_sent','source_status_sent'] for x in report['telegram_samples'])
     report['scheduled']=False;write_json(ROOT/'data/source_sample_status.json',report);db.close()
     print(json.dumps(report,ensure_ascii=False,indent=2))
+    if report['telegram_messages_sent']!=len(sources):raise SystemExit(1)
 if __name__=='__main__':
     try:main()
     except ProbeError as exc:print('Stopped: '+str(exc));raise SystemExit(1)

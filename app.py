@@ -1,6 +1,6 @@
 """Local read-only dashboard. Viewing/filtering never calls a data provider."""
 import http.server,json,pathlib,urllib.parse
-from monitor import ROOT,connect,all_posts,costs
+from monitor import ROOT,connect,all_posts,costs,load_sources
 
 def serve(db_path,port):
  class Handler(http.server.BaseHTTPRequestHandler):
@@ -10,7 +10,7 @@ def serve(db_path,port):
    elif path=='/api/data':
     db=connect(db_path);posts=all_posts(db);db.close()
     report=json.loads((ROOT/'data/last_run.json').read_text()) if (ROOT/'data/last_run.json').exists() else {}
-    body=json.dumps({'posts':posts,'report':report,'costs':[costs(n,m) for n in [50,60] for m in [15,30]]},ensure_ascii=False).encode();kind='application/json; charset=utf-8'
+    body=json.dumps({'posts':posts,'sources':load_sources(ROOT/'sources.json'),'report':report,'costs':[costs(n,m) for n in [50,60] for m in [15,30]]},ensure_ascii=False).encode();kind='application/json; charset=utf-8'
    else:self.send_error(404);return
    self.send_response(200);self.send_header('Content-Type',kind);self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src https:; media-src https:; connect-src 'self'; frame-ancestors 'none'");self.end_headers();self.wfile.write(body)
   def log_message(self,*args):pass
