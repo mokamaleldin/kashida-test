@@ -10,13 +10,13 @@ let DATA={posts:[],report:{}};const $=id=>document.getElementById(id);const name
 function el(tag,text,cls){const x=document.createElement(tag);if(text!==undefined)x.textContent=text;if(cls)x.className=cls;return x}
 function norm(s){return (s||'').replace(/[\u064b-\u065f\u0670\u0640]/g,'').replace(/[أإآ]/g,'ا').toLowerCase()}
 function urlSafe(s){try{const u=new URL(s);return u.protocol==='https:'?u.href:null}catch{return null}}
-function when(t){if(!t)return 'غير متاح';return new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo'})+' بتوقيت القاهرة'}
-function telegram(p){return p.source_name+'\nنوع المحتوى: '+names[p.media_type]+'\nوقت المصدر: '+when(p.published_at)+'\n\n'+(p.text||'منشور بدون نص')+'\n\n'+p.url}
+function when(t){if(!t)return 'غير متاح';return new Intl.DateTimeFormat('ar-EG',{timeZone:'Africa/Cairo',weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}).format(new Date(t))+' (القاهرة)'}
+function telegram(p){return '📰 '+p.source_name+'\nالمنصة: '+(p.platform||'Facebook')+' · المحتوى: '+names[p.media_type]+'\n🕒 النشر: '+when(p.published_at)+'\n📥 الرصد: '+when(p.collected_at)+'\n\n'+(p.text||'منشور بدون نص')+'\n\n'+p.url}
 function render(){
  const source=$('source').value,type=$('type').value,include=norm($('include').value),exclude=norm($('exclude').value),age=Number($('age').value),min=Number($('reactions').value||0),available=$('available').value;
  const rows=DATA.posts.filter(p=>(!source||source===p.source_id)&&(!type||type===p.media_type)&&(!include||norm(p.text).includes(include))&&(!exclude||!norm(p.text).includes(exclude))&&(!age||(p.published_at&&Date.now()-Date.parse(p.published_at)<=age*60000))&&(!min||(p.reactions!==null&&p.reactions>=min))&&(!available||p.media_url_available)).sort((a,b)=>(b.published_at||'').localeCompare(a.published_at||''));
  $('count').textContent=rows.length+' منشور مطابق للفلاتر';$('posts').replaceChildren();
- for(const p of rows){const card=el('article');card.append(el('h3',p.source_name+' · '+names[p.media_type]));card.append(el('div',when(p.published_at)+' · التفاعل: '+(p.reactions??'غير متاح')+' · التعليقات: '+(p.comments??'غير متاح'),'meta'));
+ for(const p of rows){const card=el('article');card.append(el('h3',p.source_name+' · '+(p.platform||'Facebook')+' · '+names[p.media_type]));card.append(el('div','النشر: '+when(p.published_at)+' · الرصد: '+when(p.collected_at)+' · التفاعل: '+(p.reactions??'غير متاح')+' · التعليقات: '+(p.comments??'غير متاح'),'meta'));
  card.append(el('p',p.text||'لا يوجد نص في الاستجابة؛ افحص الوسائط أوالمنشور الأصلي.'));
  if(p.filter_reasons&&p.filter_reasons.length)card.append(el('p','ملاحظات الجمع: '+p.filter_reasons.join('، '),'warning'));
  const actions=el('div',undefined,'actions'),link=el('a','فتح المنشور الأصلي');link.href=urlSafe(p.url)||'#';link.target='_blank';link.rel='noopener noreferrer';actions.append(link);

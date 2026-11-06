@@ -1,6 +1,7 @@
 """Bounded Facebook monitoring experiment. Python 3.11+, standard library only."""
 from __future__ import annotations
-import argparse, datetime as dt, getpass, hashlib, json, os, pathlib, re, sqlite3, sys, time
+import argparse, datetime as dt, getpass, hashlib, html, json, os, pathlib, re, sqlite3, sys, time
+from zoneinfo import ZoneInfo
 import urllib.error, urllib.parse, urllib.request
 ROOT=pathlib.Path(__file__).resolve().parent
 UTC=dt.timezone.utc
@@ -89,7 +90,7 @@ def normalize(post,source,collected_at):
     else:kind='unknown'
     published=parse_time(values.get('publish_time'))
     reactions=post.get('reactions') or {}
-    return {'source_id':source['id'],'source_name':source['name'],'id':str(ident),'url':url,'text':text,'published_at':stamp(published) if published else None,'time_origin':'provider.values.publish_time','time_semantics_verified':False,'collected_at':collected_at,'media_type':kind,'media':media,'media_url_available':any(m['type']==kind for m in media),'shared_post':bool(values.get('shared_post')),'reactions':number(reactions.get('total_reaction_count')),'comments':number(details.get('comments_count')),'shares':number(details.get('share_count')),'views':number(details.get('play_count'))}
+    return {'platform':'Facebook','source_id':source['id'],'source_name':source['name'],'id':str(ident),'url':url,'text':text,'published_at':stamp(published) if published else None,'time_origin':'provider.values.publish_time','time_semantics_verified':False,'collected_at':collected_at,'media_type':kind,'media':media,'media_url_available':any(m['type']==kind for m in media),'shared_post':bool(values.get('shared_post')),'reactions':number(reactions.get('total_reaction_count')),'comments':number(details.get('comments_count')),'shares':number(details.get('share_count')),'views':number(details.get('play_count'))}
 
 def arabic(text):return re.sub(r'[\u064b-\u065f\u0670\u0640]','',text).replace('أ','ا').replace('إ','ا').replace('آ','ا').lower()
 def filter_post(post,filters,since=None):
@@ -191,12 +192,47 @@ def collect(db,sources,settings,token,request_cap=None):
 def all_posts(db):
     rows=[json.loads(r['payload']) for r in db.execute('SELECT payload FROM posts ORDER BY last_seen DESC')]
     for row in rows:
+        row.setdefault('platform','Facebook')
         if 'media_url_available' not in row:row['media_url_available']=row.pop('media_download_available',False)
     return rows
 
-def message(post):
-    body=post.get('text') or 'منشور بدون نص'
-    return f"{post['source_name']}\nنوع المحتوى: {post['media_type']}\nوقت المصدر: {post.get('published_at') or 'غير متاح'}\n\n{body[:2800]}\n\n{post['url']}"
+MEDIA_NAMES={'text':'نص','photo':'صورة','video':'فيديو','link':'رابط','unknown':'غير محدد'}
+AR_DAYS=['الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد']
+AR_MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+
+def format_timestamp(value):
+    parsed=parse_time(value)
+    if parsed is None:return 'غير متاح'
+    local=parsed.astimezone(ZoneInfo('Africa/Cairo'))
+    clock=f"{local.hour % 12 or 12}:{local.minute:02d} {'صباحًا' if local.hour<12 else 'مساءً'}"
+    return f"{AR_DAYS[local.weekday()]} {local.day} {AR_MONTHS[local.month-1]} {local.year}، {clock} (القاهرة)"
+
+def utf16_units(text):return len(text.encode('utf-16-le'))//2
+
+def message(post,max_units=3900):
+    title=html.escape(str(post['source_name'])[:100])
+    platform=html.escape(str(post.get('platform') or 'Facebook'))
+    kind=MEDIA_NAMES.get(post.get('media_type'),'غير محدد')
+    head=f"📰 <b>{title}</b>\n<b>المنصة:</b> {platform}  ·  <b>المحتوى:</b> {kind}\n"
+    head+=f"🕒 <b>النشر:</b> {format_timestamp(post.get('published_at'))}\n"
+    head+=f"📥 <b>الرصد:</b> {format_timestamp(post.get('collected_at'))}\n"
+    if post.get('sample_note'):head+='🧪 '+html.escape(post['sample_note'])+'\n'
+    if post.get('shared_post'):head+='ℹ️ مُعاد مشاركته؛ التاريخ قد يخص المحتوى الأصلي.\n'
+    head+='\n'
+    url=safe_url(post.get('url'))
+    if not url:raise ProbeError('Missing original Facebook link')
+    foot='\n\n<a href="'+html.escape(url,quote=True)+'">🔗 فتح المنشور الأصلي</a>'
+    room=max_units-utf16_units(head+foot)
+    if room<5:raise ProbeError('Post metadata exceeds the Telegram message limit')
+    body=post.get('text') or 'منشور بدون نص؛ راجع الوسائط أوالرابط الأصلي.'
+    if utf16_units(html.escape(body))>room:
+        low,high=0,len(body)
+        while low<high:
+            mid=(low+high+1)//2
+            if utf16_units(html.escape(body[:mid])+'…')<=room:low=mid
+            else:high=mid-1
+        body=body[:low].rstrip()+'…'
+    return head+html.escape(body)+foot
 
 class Telegram:
     def __init__(self,token,chat):
@@ -216,11 +252,11 @@ class Telegram:
         selected=next((m for m in post['media'] if m['type']==post['media_type']),None)
         if selected and post['media_type'] in ['photo','video']:
             field=post['media_type'];method='sendPhoto' if field=='photo' else 'sendVideo'
-            try:return self.call(method,{'chat_id':self.chat,field:selected['url'],'caption':message(post)[:1000]})
+            try:return self.call(method,{'chat_id':self.chat,field:selected['url'],'caption':message(post,max_units=1000),'parse_mode':'HTML'})
             except TransportError as exc:
                 if exc.status not in [400,413]:raise
                 # Definitive media rejection only. Network timeouts are not retried.
-        return self.call('sendMessage',{'chat_id':self.chat,'text':message(post),'link_preview_options':{'is_disabled':False}})
+        return self.call('sendMessage',{'chat_id':self.chat,'text':message(post),'parse_mode':'HTML','link_preview_options':{'is_disabled':False}})
 
 def send_pending(db,client,settings,max_messages=1):
     verified=client.verify();sent=0;chat_hash=hashlib.sha256(client.chat.encode()).hexdigest()

@@ -1,0 +1,39 @@
+name: Five-source Telegram sample
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: five-source-samples
+  cancel-in-progress: false
+jobs:
+  sample:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run five-source Telegram sample'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline checks
+        run: python -m unittest discover -s tests -v
+      - name: Collect and send one sample per source
+        env:
+          SOCIALAPIS_API_KEY: ${{ secrets.SOCIALAPIS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python source_sample_check.py
+          python export_preview.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-sample-results
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            data/source_sample_status.json
+            data/preview.html
