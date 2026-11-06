@@ -1,6 +1,6 @@
 """Bounded, user-initiated Telegram demo. Never calls SocialAPIs."""
 import argparse,html,json,os,pathlib,sqlite3,time
-from monitor import ROOT,Telegram,ProbeError,TransportError,now,stamp,format_timestamp,message,read_json,write_json
+from monitor import ROOT,Telegram,ProbeError,TransportError,now,stamp,format_timestamp,message,read_json,write_json,utf16_units,safe_url
 import datetime as dt
 
 COMMANDS=[{'command':c,'description':d} for c,d in [
@@ -19,25 +19,60 @@ class Demo:
  def __init__(self,client,sources,samples,db,expires_at,trend_report=None):
   self.client=client;self.sources=sources;self.samples=ordered_posts(samples,sources);self.db=db;self.expires_at=expires_at;self.sent=0;self.last_send=0
   self.trend_report=trend_report
+  self.cache_path=None;self.media_groups_sent=0;self.delivery_calls=0
   db.executescript('CREATE TABLE IF NOT EXISTS handled(update_id INTEGER PRIMARY KEY); CREATE TABLE IF NOT EXISTS demo_requests(chat_id TEXT PRIMARY KEY,at REAL);')
  def deliver(self,method,payload):
-  if self.sent>=100:raise ProbeError('Demo message budget exhausted')
+  expected=len(payload.get('media',[])) if method=='sendMediaGroup' else 1
+  if self.sent+expected>100:raise ProbeError('Demo message budget exhausted')
   pause=1.3-(time.monotonic()-self.last_send)
   if pause>0:time.sleep(pause)
   self.last_send=time.monotonic()
-  result=self.client.call(method,payload)
+  self.delivery_calls+=1;result=self.client.call(method,payload)
   self.last_send=time.monotonic()
-  if not isinstance(result,dict) or not result.get('message_id'):raise ProbeError('Telegram acknowledgement missing')
-  self.sent+=1
+  messages=result if isinstance(result,list) else [result]
+  if len(messages)!=expected or not all(isinstance(m,dict) and m.get('message_id') for m in messages):raise ProbeError('Telegram acknowledgement missing')
+  self.sent+=len(messages)
   return result
+ def album_item(self,post):
+  caption=message(post,max_units=100_000_000)
+  if utf16_units(caption)>1000:return None
+  cached=post.get('telegram_media') or {}
+  if cached.get('type')=='photo' and cached.get('file_id'):media=cached['file_id']
+  else:
+   available=[m for m in post.get('media',[]) if safe_url(m.get('url'),media=True)]
+   if any(m.get('type')=='video' for m in available):return None
+   photo=next((m for m in available if m.get('type')=='photo'),None)
+   if photo is None:return None
+   media=photo['url']
+  return {'type':'photo','media':media,'caption':caption,'parse_mode':'HTML'}
+ def save_cache(self):
+  if self.cache_path:write_json(self.cache_path,self.samples)
+ def send_posts(self,chat,posts):
+  results=[];batch=[]
+  def flush():
+   if not batch:return
+   if len(batch)==1:replies=[self.client.send(batch[0][0],chat_id=chat,send_call=self.deliver)]
+   else:
+    try:
+     replies=self.deliver('sendMediaGroup',{'chat_id':str(chat),'media':[item for _,item in batch]});self.media_groups_sent+=1
+    except TransportError as exc:
+     if exc.status not in [400,413]:raise
+     replies=[self.client.send(post,chat_id=chat,send_call=self.deliver) for post,_ in batch]
+   for (post,_),reply in zip(batch,replies):
+    if reply.get('photo'):post['telegram_media']={'type':'photo','file_id':reply['photo'][-1]['file_id']}
+   results.extend(replies);batch.clear();self.save_cache()
+  for post in posts:
+   item=self.album_item(post)
+   if item is not None:
+    batch.append((post,item))
+    if len(batch)==10:flush()
+   else:
+    flush();results.append(self.client.send(post,chat_id=chat,send_call=self.deliver));self.save_cache()
+  flush();return results
  def send(self,chat,text):
   return self.deliver('sendMessage',{'chat_id':str(chat),'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
  def help(self):
-  return ('<b>تجربة كشيدة لرصد Facebook</b>\n\n'
-   '/sources — المصادر المتاحة\n/demo — كل المنشورات المحفوظة من جميع المصادر\n/trends — نشرة موضوعات وهاشتاجات مصر\n\n'
-   'يعرض /demo المنشورات مرتبة حسب المصدر، مع نص الخبر والصورة أوالفيديو المتاح ورابط الأصل. '
-   'اكتب /demo مرة أخرى لإعادة عرضها. المنشورات محفوظة من آخر سحبة؛ الأمر لا يجلب أخبارًا جديدة.\n\n'
-   'جلسة استقبال الأوامر الحالية حتى '+format_timestamp(self.expires_at)+'.')
+  return ('<b>كشيدة</b>\n\n/sources — المصادر\n/demo — كل المنشورات بالصور\n/trends — ترندات مصر')
  def handle(self,update):
   mid=update.get('update_id');m=update.get('message') or {};chat=m.get('chat') or {};text=m.get('text') or ''
   if not isinstance(mid,int) or chat.get('type')!='private' or (m.get('from') or {}).get('is_bot') or not isinstance(text,str) or not text.startswith('/'):return
@@ -64,9 +99,7 @@ class Demo:
   last=self.db.execute('SELECT at FROM demo_requests WHERE chat_id=?',(cid,)).fetchone()
   if last and time.time()-last[0]<30:return [self.send(cid,'انتظر30 ثانية بين طلبات العينات، ثم أعد نفس الأمر.')]
   self.db.execute('INSERT INTO demo_requests VALUES(?,?) ON CONFLICT(chat_id) DO UPDATE SET at=excluded.at',(cid,time.time()));self.db.commit()
-  results=[]
-  for p in chosen:results.append(self.client.send(p,chat_id=cid,send_call=self.deliver))
-  return results
+  return self.send_posts(cid,chosen)
 
 def main():
  p=argparse.ArgumentParser();p.add_argument('--minutes',type=int,choices=[15,30,60],default=30);p.add_argument('--smoke',action='store_true');p.add_argument('--samples',default=str(ROOT/'data/demo_media_samples.json'));args=p.parse_args()
@@ -81,12 +114,20 @@ def main():
  samples=read_json(args.samples) if pathlib.Path(args.samples).exists() else read_json(ROOT/'demo_samples.json')
  expires=stamp(now()+dt.timedelta(minutes=args.minutes));db=sqlite3.connect(ROOT/'data/demo.sqlite')
  trend_path=ROOT/'data/egypt_trends.json';trend_report=read_json(trend_path) if trend_path.exists() else None
+ if trend_report:
+  from trends_probe import enrich_report
+  enrich_report(trend_report,samples);write_json(trend_path,trend_report)
  demo=Demo(client,sources,samples,db,expires,trend_report)
+ demo.cache_path=pathlib.Path(args.samples)
  if args.smoke:
   if client.call('setMyCommands',{'commands':COMMANDS}) is not True:raise ProbeError('Command registration failed')
   configured=client.call('getMyCommands')
   response=demo.handle({'update_id':-1,'message':{'chat':{'id':int(client.chat),'type':'private'},'text':'/trends' if trend_report else '/start'}})
   result={'ready':True,'bot_username':verified['bot_username'],'facebook_data_requests':0,'owner_check_messages_sent':demo.sent,'cached_posts':len(demo.samples),'source_names':[s['name'] for s in sources],'trend_command_verified':bool(trend_report),'registered_commands':[x['command'] for x in configured]}
+  if os.environ.get('CHECK_DEMO')=='true':
+   before=demo.sent;started=time.monotonic();replies=demo.handle({'update_id':-2,'message':{'chat':{'id':int(client.chat),'type':'private'},'text':'/demo'}})
+   result['demo_test']={'posts_delivered':len(replies or []),'messages_sent':demo.sent-before,'media_groups_sent':demo.media_groups_sent,'elapsed_seconds':round(time.monotonic()-started,2)}
+  if trend_report:result['topic_groups']=[{k:t[k] for k in ['title','post_count','source_count']} for t in trend_report['sources']['facebook'].get('related_topics',[])]
   write_json(pathlib.Path(args.samples),samples)
   write_json(ROOT/'data/demo_smoke.json',result);print(json.dumps(result,ensure_ascii=False),flush=True);return
  started=now().timestamp();deadline=time.monotonic()+args.minutes*60;offset=0;processed=0

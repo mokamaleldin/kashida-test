@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo' || github.event.head_commit.message == 'Show all collected Telegram posts' || github.event.head_commit.message == 'Enable Egypt trends bot'
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo' || github.event.head_commit.message == 'Show all collected Telegram posts' || github.event.head_commit.message == 'Enable Egypt trends bot' || github.event.head_commit.message == 'Simplify trends and speed up demo'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -75,6 +75,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHECK_DEMO: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Simplify trends and speed up demo' }}
         run: python -u telegram_demo.py --smoke
       - uses: actions/upload-artifact@v4
         with:

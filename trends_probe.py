@@ -67,7 +67,7 @@ def parse_google(raw):
  if not rows:raise ProbeError('Google RSS contains no items')
  return rows
 
-def facebook_sample(posts):
+def facebook_sample(posts,signals=()):
  unique={}
  for p in posts:unique[(p['source_id'],p['id'])]=p
  rows=list(unique.values());since=now()-dt.timedelta(hours=24)
@@ -96,8 +96,20 @@ def facebook_sample(posts):
   if not any(item['name'] in other['name'] or other['name'] in item['name'] for other in selected):selected.append(item)
   if len(selected)==8:break
  hashtags=[{'name':x['name'],'post_count':len(x['evidence']),'source_count':len({e['source_id'] for e in x['evidence']}),'evidence':x['evidence'][:4]} for x in tags.values()]
+ publisher_tags={norm(p['source_name']).replace(' ','').lstrip('#') for p in rows}
+ hashtags=[h for h in hashtags if norm(h['name']).replace(' ','').lstrip('#') not in publisher_tags]
  hashtags.sort(key=lambda x:(-x['source_count'],-x['post_count'],x['name']))
- return {'platform':'Facebook','coverage':'selected_sources_sample','country_inference':'source_selection_only','cached_posts':len(rows),'posts_last_24h':len(recent),'sources':len({p['source_id'] for p in recent}),'last_collected_at':max((p.get('collected_at') or '' for p in rows),default=None),'hashtags':hashtags[:10],'repeated_phrases':selected,'growth_measured':False}
+ from topic_links import link_topics,all_topics
+ related=link_topics(recent,signals)
+ return {'platform':'Facebook','coverage':'selected_sources_sample','country_inference':'source_selection_only','cached_posts':len(rows),'posts_last_24h':len(recent),'sources':len({p['source_id'] for p in recent}),'last_collected_at':max((p.get('collected_at') or '' for p in rows),default=None),'hashtags':hashtags[:10],'repeated_phrases':selected,'related_topics':related,'topics':all_topics(recent,related,signals),'growth_measured':False}
+
+def enrich_report(report,posts):
+ signals=[]
+ for key in ['x','google']:
+  source=report.get('sources',{}).get(key,{})
+  signals.extend({**item,'platform':'X' if key=='x' else 'Google'} for item in source.get('items',[]))
+ report['sources']['facebook']=facebook_sample(posts,signals)
+ return report
 
 def collect_once(cache_path=None,probe_access=False):
  result={'created_at':stamp(),'country':'EG','socialapis_requests':0,'paid_api_requests':0,'sources':{},'probes':{}}
@@ -116,7 +128,7 @@ def collect_once(cache_path=None,probe_access=False):
  try:
   raw,status,_=fetch(GOOGLE_RSS);result['sources']['google']={'platform':'Google Search','provider':'Google Trends RSS','coverage':'country_search_interest','country':'EG','http_status':status,'url':GOOGLE_RSS,'items':parse_google(raw)}
  except (ProbeError,ET.ParseError,ValueError) as exc:result['sources']['google']={'error':str(exc)}
- if cache_path and pathlib.Path(cache_path).exists():result['sources']['facebook']=facebook_sample(read_json(cache_path))
+ if cache_path and pathlib.Path(cache_path).exists():enrich_report(result,read_json(cache_path))
  else:result['sources']['facebook']={'error':'No Facebook cache available; no new data requested'}
  # A token-less probe checks the access requirement; it cannot incur authenticated charges.
  if probe_access and not token:
@@ -125,39 +137,50 @@ def collect_once(cache_path=None,probe_access=False):
  return result
 
 def render_messages(data):
- header='🇪🇬 <b>رصد موضوعات وهاشتاجات مصر</b>\nتم الجلب: '+format_timestamp(data['created_at'])
- messages=[];x=data['sources'].get('x',{})
- if x.get('items'):
-  lines=[header,'','<b>X — '+('API رسمي' if x.get('coverage')=='official_country_trends' else 'قائمة مصر حسب GetDayTrends؛ مصدر خارجي')+'</b>']
-  for item in x['items'][:10]:lines.append(str(item.get('rank',len(lines)-2))+'. '+html.escape(item['name']))
-  if not x.get('source_updated_at'):lines.append('توقيت تحديث قائمة المصدر غير متاح؛ وقت الجلب ظاهر أعلاه.')
-  lines.append('<a href="'+html.escape(x.get('url',GETDAY),quote=True)+'">فتح المصدر</a>');messages.append('\n'.join(lines))
- else:messages.append(header+'\n\nX: لم تكتمل القراءة الآلية من المصدر العام. الـAPI الرسمي يحتاج مفتاح X مستقلًا.')
- fb=data['sources'].get('facebook',{});lines=['<b>Facebook — داخل المصادر التي اخترناها فقط</b>']
- if fb.get('cached_posts'):
-  lines.append(str(fb['posts_last_24h'])+' منشورًا من آخر24 ساعة داخل ملف محفوظ؛ '+str(fb['sources'])+' مصادر.')
-  lines.append('آخر جمع للملف: '+format_timestamp(fb.get('last_collected_at')))
-  if fb.get('hashtags'):
-   lines.append('\nالهاشتاجات الموجودة:')
-   for item in fb['hashtags'][:5]:lines.append(html.escape(item['name'])+' — '+str(item['post_count'])+' منشورات / '+str(item['source_count'])+' مصادر')
-  else:lines.append('لم تظهر هاشتاجات في المنشورات المتاحة.')
-  if fb.get('repeated_phrases'):
-   lines.append('\nعبارات متكررة بين مصادر مختلفة:')
-   for item in fb['repeated_phrases'][:4]:lines.append('• '+html.escape(item['name'])+' — '+str(item['source_count'])+' مصادر')
-  else:lines.append('العينة لا تكفي لإثبات موضوع متكرر بين مصدرين.')
-  lines.append('هذه إشارة داخل العينة، وليست قائمة ترند Facebook في مصر، ولم نقس نموها بمرور الوقت.')
- else:lines.append('لا يوجد ملف حديث متاح للتحليل؛ لم نسحب منشورات جديدة.')
- messages.append('\n'.join(lines))
- g=data['sources'].get('google',{});lines=['<b>إشارة إضافية: عمليات البحث الرائجة في مصر</b>']
- if g.get('items'):
-  for item in g['items'][:5]:lines.append('• '+html.escape(item['name'])+(' — '+html.escape(item['traffic_label']) if item.get('traffic_label') else ''))
-  lines.append('المصدر: Google Trends RSS. هذه اهتمامات بحث، وليست هاشتاجات منصات التواصل.');lines.append('<a href="https://trends.google.com/trending?geo=EG">فتح المصدر</a>')
- else:lines.append('تعذر جلب RSS؛ لا نعرض نتائج بديلة على أنها نتائج مصر.')
+ header='🇪🇬 <b>ترندات مصر</b>\n'+format_timestamp(data['created_at'])
+ x=data['sources'].get('x',{});lines=[header,'','<b>هاشتاجات وموضوعات شائعة في مصر · X</b>']
+ for number,item in enumerate(x.get('items',[])[:10],1):lines.append(str(number)+'. '+html.escape(item['name']))
+ if not x.get('items'):lines.append('القائمة غير متاحة حاليًا.')
+ source_url=x.get('url') or ('https://docs.x.com/x-api/trends/get-trends-by-woeid' if x.get('coverage')=='official_country_trends' else GETDAY)
+ lines.append('<a href="'+html.escape(source_url,quote=True)+'">المصدر</a>');messages=['\n'.join(lines)]
+ g=data['sources'].get('google',{});lines=['<b>عمليات البحث الرائجة في مصر · Google</b>']
+ for number,item in enumerate(g.get('items',[]),1):lines.append(str(number)+'. '+html.escape(item['name']))
+ if not g.get('items'):lines.append('القائمة غير متاحة حاليًا.')
+ lines.append('<a href="https://trends.google.com/trending?geo=EG">المصدر</a>');messages.append('\n'.join(lines))
+ fb=data['sources'].get('facebook',{});lines=[]
+ if fb.get('hashtags'):
+  lines.append('<b>هاشتاجات المنشورات</b>')
+  for item in fb['hashtags']:lines.append('• '+html.escape(item['name'])+' — '+str(item['post_count'])+' منشورات')
+  lines.append('')
+ lines.append('<b>موضوعات المنشورات والروابط بينها</b>')
+ topics=fb.get('topics',fb.get('related_topics',[]))
+ for number,item in enumerate(topics,1):
+  platforms=sorted({m['platform'] for m in item.get('matched_trends',[]) if m.get('platform')})
+  lines.append(str(number)+'. <b>'+html.escape(item['title'])+'</b>'+(' — '+str(item['post_count'])+' منشورات مرتبطة' if item['post_count']>1 else '')+(' · '+html.escape(' / '.join(platforms)) if platforms else ''))
+  evidence=[];seen_sources=set()
+  for post in item['evidence']:
+   if post['source_id'] in seen_sources:continue
+   seen_sources.add(post['source_id']);label=post['source_name']+(': '+' '.join(post['headline'].split()[:7]) if item['post_count']>1 else '')
+   evidence.append('<a href="'+html.escape(post['url'],quote=True)+'">'+html.escape(label)+'</a>')
+   if len(evidence)==2:break
+  if len(evidence)==1 and len(item['evidence'])>1:
+   post=item['evidence'][1];evidence.append('<a href="'+html.escape(post['url'],quote=True)+'">منشور آخر</a>')
+  lines.append('\n'.join(evidence))
+ if not topics:lines.append('لا توجد منشورات متاحة للتحليل.')
  messages.append('\n'.join(lines));return messages
 
 def digest_messages(data):
  parts=render_messages(data);combined='\n\n'.join(parts)
- return [combined] if utf16_units(combined)<=3900 else parts
+ if utf16_units(combined)<=3900:return [combined]
+ result=[]
+ for part in parts:
+  chunk=[]
+  for line in part.splitlines():
+   if utf16_units(line)>3900:raise ProbeError('A trend item exceeds Telegram message limits')
+   if chunk and utf16_units('\n'.join(chunk+[line]))>3900:result.append('\n'.join(chunk));chunk=[]
+   chunk.append(line)
+  if chunk:result.append('\n'.join(chunk))
+ return result
 
 def trial_enabled(value=None):
  # The product trial is bounded to seven future daily deliveries, not an indefinite job.
@@ -173,7 +196,7 @@ def main():
  if args.send:
   client=Telegram(os.environ.get('TELEGRAM_BOT_TOKEN'),os.environ.get('TELEGRAM_CHAT_ID'))
   if client.verify().get('bot_username')!='test_kashida_bot':raise ProbeError('Unexpected bot')
-  for text in brief[:3]:
+  for text in brief:
    if utf16_units(text)>3900:raise ProbeError('Trend summary exceeds message limit')
    response=client.call('sendMessage',{'chat_id':client.chat,'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
    if not response.get('message_id'):raise ProbeError('Telegram acknowledgement missing')

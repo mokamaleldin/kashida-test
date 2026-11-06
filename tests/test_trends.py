@@ -25,7 +25,7 @@ class TrendTests(unittest.TestCase):
   self.assertEqual(data['cached_posts'],2);self.assertEqual(data['posts_last_24h'],1)
  def test_failed_sources_are_visible_not_replaced_with_fabricated_topics(self):
   texts=render_messages({'created_at':stamp(),'sources':{'x':{'error':'HTTP 403'},'google':{'error':'HTTP 429'},'facebook':{'error':'no cache'}}})
-  self.assertEqual(len(texts),3);self.assertIn('لم تكتمل',texts[0]);self.assertIn('تعذر',texts[2])
+  self.assertEqual(len(texts),3);self.assertIn('غير متاحة',texts[0]);self.assertIn('غير متاحة',texts[1])
  def test_external_topic_names_are_html_escaped(self):
   text=render_messages({'created_at':stamp(),'sources':{'x':{'items':[{'name':'<b>unsafe</b>','kind':'topic'}],'provider':'GetDayTrends'}}})[0]
   self.assertIn('&lt;b&gt;',text);self.assertNotIn('<b>unsafe',text)
@@ -34,6 +34,10 @@ class TrendTests(unittest.TestCase):
   self.assertFalse(trial_enabled(dt.datetime(2026,11,13,22,tzinfo=dt.timezone.utc)))
  def test_daily_digest_is_one_message_when_it_fits(self):
   parts=digest_messages({'created_at':stamp(),'sources':{}});self.assertEqual(len(parts),1)
+ def test_trend_lists_are_short_and_source_labels_stay_visible(self):
+  data={'created_at':stamp(),'sources':{'x':{'items':[{'name':'موضوع '+str(i)} for i in range(15)]},'google':{'items':[{'name':'بحث '+str(i)} for i in range(10)]}}}
+  parts=render_messages(data);self.assertIn('10. موضوع 9',parts[0]);self.assertNotIn('موضوع 10',parts[0]);self.assertIn('10. بحث 9',parts[1])
+  self.assertIn('· X',parts[0]);self.assertNotIn('إشارة إضافية','\n'.join(parts));self.assertNotIn('داخل المصادر','\n'.join(parts))
  def test_malformed_api_secret_cannot_appear_in_error(self):
   secret='private-value\nbad-line'
   with patch.dict('os.environ',{'X_BEARER_TOKEN':secret}):

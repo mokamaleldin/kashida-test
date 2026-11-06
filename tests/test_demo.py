@@ -3,11 +3,14 @@ from unittest.mock import patch
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
 from telegram_demo import Demo,COMMANDS
 from prepare_demo_cache import group_name
-from monitor import ROOT,read_json,Telegram
+from monitor import ROOT,read_json,Telegram,TransportError
 
 class FakeTelegram:
  def __init__(self):self.calls=[]
- def call(self,method,payload):self.calls.append((method,payload));return {'message_id':len(self.calls)}
+ def call(self,method,payload):
+  self.calls.append((method,payload))
+  if method=='sendMediaGroup':return [{'message_id':i+1,'photo':[{'file_id':'saved-'+str(i)}]} for i,_ in enumerate(payload['media'])]
+  return {'message_id':len(self.calls)}
  def send(self,post,**kwargs):return Telegram.send(self,post,**kwargs)
 
 class DemoTests(unittest.TestCase):
@@ -60,6 +63,16 @@ class DemoTests(unittest.TestCase):
   with patch('trends_probe.fetch',side_effect=AssertionError('Replay must not fetch data')):
    self.demo.handle(self.incoming('/trends'))
   self.assertEqual(len(self.client.calls),1);self.assertIn('#اختبار',self.client.calls[0][1]['text'])
+ def test_photos_are_sent_as_two_albums_for_twelve_posts(self):
+  base=self.demo.samples[0];rows=[{**base,'id':str(i),'url':base['url']+'?i='+str(i),'text':'خبر قصير','media':[{'type':'photo','url':'https://scontent.fbcdn.net/picture.jpg'}]} for i in range(12)]
+  result=self.demo.send_posts('12345',rows)
+  self.assertEqual(len(result),12);self.assertEqual([len(payload['media']) for method,payload in self.client.calls],[10,2]);self.assertEqual(self.demo.sent,12)
+  for post in rows:self.assertIn('file_id',post['telegram_media'])
+ def test_ambiguous_album_failure_is_not_retried(self):
+  base=self.demo.samples[0];rows=[{**base,'id':str(i),'text':'خبر قصير','media':[{'type':'photo','url':'https://scontent.fbcdn.net/picture.jpg'}]} for i in range(2)]
+  with patch.object(self.client,'call',side_effect=TransportError()) as call:
+   with self.assertRaises(TransportError):self.demo.send_posts('12345',rows)
+  self.assertEqual(call.call_count,1)
  def test_snapshot_has_no_group_bodies_or_direct_media(self):
   for p in self.demo.samples:
    self.assertEqual(p['media'],[])
