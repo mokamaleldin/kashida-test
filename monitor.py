@@ -213,9 +213,9 @@ def message(post,max_units=3900,include_text=True):
     title=html.escape(str(post['source_name'])[:100])
     platform=html.escape(str(post.get('platform') or 'Facebook'))
     kind=MEDIA_NAMES.get(post.get('media_type'),'غير محدد')
-    head=f"📰 <b>{title}</b>\n<b>المنصة:</b> {platform}  ·  <b>المحتوى:</b> {kind}\n"
-    head+=f"🕒 <b>النشر:</b> {format_timestamp(post.get('published_at'))}\n"
-    head+=f"📥 <b>الرصد:</b> {format_timestamp(post.get('collected_at'))}\n"
+    head=f"📰 <b>المصدر: {title}</b>\n<b>المنصة:</b> {platform}  ·  <b>المحتوى:</b> {kind}\n"
+    head+=f"🕒 <b>تم نشره:</b> {format_timestamp(post.get('published_at'))}\n"
+    head+=f"📥 <b>تم رصده:</b> {format_timestamp(post.get('collected_at'))}\n"
     head+='\n'
     url=safe_url(post.get('url'))
     if not url:raise ProbeError('Missing original Facebook link')

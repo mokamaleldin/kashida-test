@@ -10,7 +10,7 @@ on:
         options: ['15', '30', '60']
         default: '30'
       refresh_samples:
-        description: 'Refresh source data once (up to 5 SocialAPIs credits); otherwise reuse cache'
+        description: 'Refresh posts and group names once (up to 7 credits); otherwise reuse cache'
         type: boolean
         default: false
 permissions:
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo'
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo' || github.event.head_commit.message == 'Show all collected Telegram posts'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -35,21 +35,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          DEMO_CACHE_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=demo-media-cache&per_page=20" --jq '[.artifacts[] | select(.expired == false)] | first | .workflow_run.id // empty')
+          DEMO_CACHE_NAME=demo-media-cache-v2
+          DEMO_CACHE_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$DEMO_CACHE_NAME&per_page=20" --jq '[.artifacts[] | select(.expired == false)] | first | .workflow_run.id // empty')
+          if [ -z "$DEMO_CACHE_RUN" ]; then
+            DEMO_CACHE_NAME=demo-media-cache
+            DEMO_CACHE_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$DEMO_CACHE_NAME&per_page=20" --jq '[.artifacts[] | select(.expired == false)] | first | .workflow_run.id // empty')
+          fi
           printf 'run_id=%s\n' "$DEMO_CACHE_RUN" >> "$GITHUB_OUTPUT"
+          printf 'cache_name=%s\n' "$DEMO_CACHE_NAME" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
-        if: steps.cache.outputs.run_id != '' && inputs.refresh_samples != true
+        if: steps.cache.outputs.run_id != ''
         with:
-          name: demo-media-cache
+          name: ${{ steps.cache.outputs.cache_name }}
           path: data
           run-id: ${{ steps.cache.outputs.run_id }}
           github-token: ${{ github.token }}
       - name: Collect source samples once when needed
-        if: steps.cache.outputs.run_id == '' || inputs.refresh_samples == true
+        if: steps.cache.outputs.run_id == '' || steps.cache.outputs.cache_name != 'demo-media-cache-v2' || inputs.refresh_samples == true
         env:
           SOCIALAPIS_API_KEY: ${{ secrets.SOCIALAPIS_API_KEY }}
         run: python -u prepare_demo_cache.py
-      - name: Register commands and verify one news sample with media
+      - name: Register two commands and verify source names
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -61,8 +67,10 @@ jobs:
           retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
-          name: demo-media-cache
-          path: data/demo_media_samples.json
+          name: demo-media-cache-v2
+          path: |
+            data/demo_media_samples.json
+            data/demo_sources.json
           retention-days: 3
   listen:
     needs: check
@@ -75,7 +83,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: demo-media-cache
+          name: demo-media-cache-v2
           path: data
       - name: Listen for private chat commands
         env:

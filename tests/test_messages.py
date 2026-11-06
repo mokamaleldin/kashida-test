@@ -17,7 +17,7 @@ class MessageTests(unittest.TestCase):
  def test_untrusted_text_escaped_and_metadata_preserved(self):
   p=post(text='<script>bad</script> & <b>raw</b>');text=message(p)
   self.assertIn('&lt;script&gt;',text);self.assertNotIn('<script>',text)
-  for value in ['Facebook','صورة','النشر','الرصد',p['url']]:self.assertIn(value,text)
+  for value in ['المصدر','Facebook','صورة','تم نشره','تم رصده',p['url']]:self.assertIn(value,text)
  def test_long_photo_caption_keeps_original_link_and_valid_html(self):
   p=post(text='😀 <نص> & '*2000);text=message(p,max_units=1000)
   self.assertLessEqual(utf16_units(text),1000);self.assertTrue(text.endswith('</a>'));self.assertIn(p['url'],text)

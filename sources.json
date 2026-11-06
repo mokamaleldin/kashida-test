@@ -2,6 +2,6 @@
   {"id":"rassd","name":"شبكة رصد","kind":"page","url":"https://www.facebook.com/RassdNewsN","enabled":true},
   {"id":"youm7","name":"اليوم السابع","kind":"page","url":"https://www.facebook.com/Youm7","enabled":true},
   {"id":"mazid","name":"مزيد","kind":"page","url":"https://www.facebook.com/mazidstories","enabled":true},
-  {"id":"group-783","name":"الجروب الأول","kind":"group","url":"https://www.facebook.com/groups/783030320118289","enabled":true},
-  {"id":"group-230","name":"الجروب الثاني","kind":"group","url":"https://www.facebook.com/groups/230664764330181","enabled":true}
+  {"id":"group-783","name":"جروب Facebook 783030320118289","kind":"group","url":"https://www.facebook.com/groups/783030320118289","enabled":true},
+  {"id":"group-230","name":"جروب Facebook 230664764330181","kind":"group","url":"https://www.facebook.com/groups/230664764330181","enabled":true}
 ]

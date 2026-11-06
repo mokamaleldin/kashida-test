@@ -1,7 +1,8 @@
 import pathlib,sqlite3,sys,unittest
 from unittest.mock import patch
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
-from telegram_demo import Demo
+from telegram_demo import Demo,COMMANDS
+from prepare_demo_cache import group_name
 from monitor import ROOT,read_json,Telegram
 
 class FakeTelegram:
@@ -32,9 +33,25 @@ class DemoTests(unittest.TestCase):
   self.assertEqual(len(self.client.calls),6);self.assertIn('انتظر30',self.client.calls[-1][1]['text'])
   with patch('telegram_demo.time.time',return_value=131):self.demo.handle(self.incoming('/demo',3))
   self.assertEqual(len(self.client.calls),11)
- def test_single_source_stays_single(self):
-  self.demo.handle(self.incoming('/sample rassd'));self.assertEqual(len(self.client.calls),1)
-  self.assertIn('شبكة رصد',self.client.calls[0][1]['text'])
+ def test_removed_commands_do_not_send_news(self):
+  self.assertEqual([c['command'] for c in COMMANDS],['sources','demo'])
+  self.demo.handle(self.incoming('/cost',1));self.demo.handle(self.incoming('/sample rassd',2))
+  self.assertEqual(len(self.client.calls),2)
+  self.assertTrue(all('فتح المنشور الأصلي' not in payload['text'] for _,payload in self.client.calls))
+ def test_demo_sends_all_fifteen_not_only_latest_per_source(self):
+  rows=[]
+  for p in self.demo.samples:
+   for index in range(3):rows.append({**p,'id':p['id']+'-'+str(index),'url':p['url']+'?trial='+str(index)})
+  demo=Demo(self.client,self.demo.sources,rows,self.db,self.demo.expires_at)
+  result=demo.handle(self.incoming('/demo'));self.assertEqual(len(result),15);self.assertEqual(len(self.client.calls),15)
+  self.assertEqual(len(set(payload['text'] for _,payload in self.client.calls)),15)
+ def test_sources_are_links_without_removed_commands(self):
+  self.demo.handle(self.incoming('/sources'));text=self.client.calls[0][1]['text']
+  self.assertIn('<a href=',text);self.assertNotIn('/sample',text);self.assertNotIn('/cost',text)
+ def test_group_name_comes_from_group_metadata_not_author(self):
+  self.assertEqual(group_name({'group_name':'أخبار المدينة'}),'أخبار المدينة')
+  self.assertEqual(group_name({'data':{'group_info':{'name':'أهالي المدينة'}}}),'أهالي المدينة')
+  self.assertIsNone(group_name({'user_details':{'name':'اسم الكاتب'}}))
  def test_groups_and_noncommands_ignored(self):
   self.demo.handle(self.incoming('/demo',1,'group'));self.demo.handle(self.incoming('hello',2));self.assertEqual(self.client.calls,[])
  def test_snapshot_has_no_group_bodies_or_direct_media(self):
