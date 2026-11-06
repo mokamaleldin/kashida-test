@@ -1,0 +1,34 @@
+name: One-time integration check
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      send_test_message:
+        description: 'Send one plain test message to the configured Telegram chat'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run one-time integration check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify configured services
+        env:
+          SOCIALAPIS_API_KEY: ${{ secrets.SOCIALAPIS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SEND_TEST_MESSAGE: ${{ github.event_name == 'push' && 'true' || inputs.send_test_message }}
+        run: python integration_check.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integration-status
+          path: data/integration_status.json
+          retention-days: 3
