@@ -209,22 +209,20 @@ def format_timestamp(value):
 
 def utf16_units(text):return len(text.encode('utf-16-le'))//2
 
-def message(post,max_units=3900):
+def message(post,max_units=3900,include_text=True):
     title=html.escape(str(post['source_name'])[:100])
     platform=html.escape(str(post.get('platform') or 'Facebook'))
     kind=MEDIA_NAMES.get(post.get('media_type'),'غير محدد')
     head=f"📰 <b>{title}</b>\n<b>المنصة:</b> {platform}  ·  <b>المحتوى:</b> {kind}\n"
     head+=f"🕒 <b>النشر:</b> {format_timestamp(post.get('published_at'))}\n"
     head+=f"📥 <b>الرصد:</b> {format_timestamp(post.get('collected_at'))}\n"
-    if post.get('sample_note'):head+='🧪 '+html.escape(post['sample_note'])+'\n'
-    if post.get('shared_post'):head+='ℹ️ مُعاد مشاركته؛ التاريخ قد يخص المحتوى الأصلي.\n'
     head+='\n'
     url=safe_url(post.get('url'))
     if not url:raise ProbeError('Missing original Facebook link')
     foot='\n\n<a href="'+html.escape(url,quote=True)+'">🔗 فتح المنشور الأصلي</a>'
     room=max_units-utf16_units(head+foot)
     if room<5:raise ProbeError('Post metadata exceeds the Telegram message limit')
-    body=post.get('text') or 'منشور بدون نص؛ راجع الوسائط أوالرابط الأصلي.'
+    body=(post.get('text') or 'منشور بدون نص؛ راجع الوسائط أوالرابط الأصلي.') if include_text else ''
     if utf16_units(html.escape(body))>room:
         low,high=0,len(body)
         while low<high:
@@ -233,6 +231,24 @@ def message(post,max_units=3900):
             else:high=mid-1
         body=body[:low].rstrip()+'…'
     return head+html.escape(body)+foot
+
+def message_parts(post,max_units=3900):
+    body=post.get('text') or 'منشور بدون نص؛ راجع الوسائط أوالرابط الأصلي.'
+    room=max_units-utf16_units(message(post,include_text=False));parts=[]
+    if room<5:raise ProbeError('Post metadata exceeds message budget')
+    while body:
+        low,high=0,len(body)
+        while low<high:
+            mid=(low+high+1)//2
+            if utf16_units(html.escape(body[:mid]))<=room:low=mid
+            else:high=mid-1
+        if not low:raise ProbeError('Cannot fit content in Telegram message')
+        if low<len(body):
+            boundary=max(body.rfind(' ',0,low),body.rfind('\n',0,low))
+            if boundary>0:low=boundary+1
+        parts.append(message({**post,'text':body[:low]},max_units=max_units));body=body[low:]
+        if len(parts)>20:raise ProbeError('Post exceeds bounded Telegram delivery size')
+    return parts
 
 class Telegram:
     def __init__(self,token,chat):
@@ -248,15 +264,34 @@ class Telegram:
         me=self.call('getMe');chat=self.call('getChat',{'chat_id':self.chat})
         if not me.get('is_bot') or str(chat.get('id'))!=self.chat:raise ProbeError('Telegram destination verification failed')
         return {'bot_username':me.get('username'),'chat_type':chat.get('type'),'chat_verified':True}
-    def send(self,post):
-        selected=next((m for m in post['media'] if m['type']==post['media_type']),None)
-        if selected and post['media_type'] in ['photo','video']:
-            field=post['media_type'];method='sendPhoto' if field=='photo' else 'sendVideo'
-            try:return self.call(method,{'chat_id':self.chat,field:selected['url'],'caption':message(post,max_units=1000),'parse_mode':'HTML'})
+    def send(self,post,chat_id=None,send_call=None):
+        destination=str(chat_id if chat_id is not None else self.chat)
+        if not re.fullmatch(r'-?\d{1,20}',destination):raise ProbeError('Invalid Telegram destination')
+        call=send_call or self.call;results=[]
+        full=message(post,max_units=100_000_000)
+        cached=post.get('telegram_media') or {}
+        candidates=([cached] if cached.get('file_id') and cached.get('type') in ['photo','video'] else [])
+        candidates+=sorted([m for m in post.get('media',[]) if m.get('type') in ['photo','video'] and safe_url(m.get('url'),media=True)],key=lambda m:m['type']!='video')
+        for selected in candidates:
+            field=selected['type'];method='sendPhoto' if field=='photo' else 'sendVideo'
+            caption=full if utf16_units(full)<=1000 else message(post,include_text=False)
+            try:
+                result=call(method,{'chat_id':destination,field:selected.get('file_id') or selected['url'],'caption':caption,'parse_mode':'HTML'})
+                results.append(result)
+                media=result.get('photo',[])[-1] if result.get('photo') else result.get('video') or {}
+                if media.get('file_id'):post['telegram_media']={'type':field,'file_id':media['file_id']}
+                break
             except TransportError as exc:
                 if exc.status not in [400,413]:raise
-                # Definitive media rejection only. Network timeouts are not retried.
-        return self.call('sendMessage',{'chat_id':self.chat,'text':message(post),'parse_mode':'HTML','link_preview_options':{'is_disabled':False}})
+                # Only definitive rejection allows trying another returned medium.
+                if send_call is None:time.sleep(1.3)
+        if not results or utf16_units(full)>1000:
+            for part in message_parts(post):
+                if results and send_call is None:time.sleep(1.3)
+                results.append(call('sendMessage',{'chat_id':destination,'text':part,'parse_mode':'HTML','link_preview_options':{'is_disabled':False}}))
+        primary=results[0]
+        if len(results)>1:primary['_additional_message_ids']=[r.get('message_id') for r in results[1:]]
+        return primary
 
 def send_pending(db,client,settings,max_messages=1):
     verified=client.verify();sent=0;chat_hash=hashlib.sha256(client.chat.encode()).hexdigest()

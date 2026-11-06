@@ -12,15 +12,18 @@ class Demo:
  def __init__(self,client,sources,samples,db,expires_at):
   self.client=client;self.sources=sources;self.samples=samples;self.db=db;self.expires_at=expires_at;self.sent=0;self.last_send=0
   db.executescript('CREATE TABLE IF NOT EXISTS handled(update_id INTEGER PRIMARY KEY); CREATE TABLE IF NOT EXISTS demo_requests(chat_id TEXT PRIMARY KEY,at REAL);')
- def send(self,chat,text):
+ def deliver(self,method,payload):
   if self.sent>=100:raise ProbeError('Demo message budget exhausted')
   pause=1.3-(time.monotonic()-self.last_send)
   if pause>0:time.sleep(pause)
-  result=self.client.call('sendMessage',{'chat_id':str(chat),'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
+  self.last_send=time.monotonic()
+  result=self.client.call(method,payload)
   self.last_send=time.monotonic()
   if not isinstance(result,dict) or not result.get('message_id'):raise ProbeError('Telegram acknowledgement missing')
   self.sent+=1
   return result
+ def send(self,chat,text):
+  return self.deliver('sendMessage',{'chat_id':str(chat),'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
  def help(self):
   return ('<b>تجربة كشيدة لرصد Facebook</b>\n\n'
    '/sources — المصادر المتاحة\n/demo — عينة واحدة محفوظة من كل مصدر\n'
@@ -28,7 +31,7 @@ class Demo:
    '/cost — حساب التكلفة\n\n'
    'الدخول و/start يعرضان التعليمات فقط. اكتب /demo مرة أخرى لإعادة العينات عند الحاجة.\n'
    'العينات محفوظة من اختبار سابق، وليست آخر الأخبار. هذه الأوامر لا تسحب Facebook ولا تستهلك رصيده. '
-   'الصور وملفات الفيديو غير مضمنة في هذا العرض؛ رابط الأصل موجود.\n\n'
+   'يعرض البوت نص المنشور مع الصورة أوالفيديو عند توفر ملف قابل للإرسال، ورابط الأصل.\n\n'
    'جلسة استقبال الأوامر الحالية حتى '+format_timestamp(self.expires_at)+'.')
  def handle(self,update):
   mid=update.get('update_id');m=update.get('message') or {};chat=m.get('chat') or {};text=m.get('text') or ''
@@ -53,25 +56,26 @@ class Demo:
   if last and time.time()-last[0]<30:return [self.send(cid,'انتظر30 ثانية بين طلبات العينات، ثم أعد نفس الأمر.')]
   self.db.execute('INSERT INTO demo_requests VALUES(?,?) ON CONFLICT(chat_id) DO UPDATE SET at=excluded.at',(cid,time.time()));self.db.commit()
   results=[]
-  for p in chosen[:5]:results.append(self.send(cid,message({**p,'sample_note':'عينة محفوظة للاختبار؛ ليست تحديثًا مباشرًا'})))
+  for p in chosen[:5]:results.append(self.client.send(p,chat_id=cid,send_call=self.deliver))
   return results
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--minutes',type=int,choices=[15,30,60],default=30);p.add_argument('--smoke',action='store_true');args=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--minutes',type=int,choices=[15,30,60],default=30);p.add_argument('--smoke',action='store_true');p.add_argument('--samples',default=str(ROOT/'data/demo_media_samples.json'));args=p.parse_args()
  token=os.environ.get('TELEGRAM_BOT_TOKEN');chat=os.environ.get('TELEGRAM_CHAT_ID')
  if not token or not chat:raise ProbeError('Telegram secrets missing')
  client=Telegram(token,chat);verified=client.verify()
  if verified.get('bot_username')!='test_kashida_bot':raise ProbeError('Unexpected bot')
  webhook=client.call('getWebhookInfo')
  if webhook.get('url'):raise ProbeError('Existing webhook found; no changes made')
- sources=read_json(ROOT/'sources.json');samples=read_json(ROOT/'demo_samples.json')
+ sources=read_json(ROOT/'sources.json');samples=read_json(args.samples) if pathlib.Path(args.samples).exists() else read_json(ROOT/'demo_samples.json')
  expires=stamp(now()+dt.timedelta(minutes=args.minutes));db=sqlite3.connect(ROOT/'data/demo.sqlite')
  demo=Demo(client,sources,samples,db,expires)
  if args.smoke:
   if client.call('setMyCommands',{'commands':COMMANDS}) is not True:raise ProbeError('Command registration failed')
   configured=client.call('getMyCommands')
-  response=demo.handle({'update_id':-1,'message':{'chat':{'id':int(client.chat),'type':'private'},'text':'/start'}})
-  result={'ready':True,'bot_username':verified['bot_username'],'facebook_data_requests':0,'owner_help_messages_sent':len(response or []),'sample_messages_sent':0,'registered_commands':[x['command'] for x in configured]}
+  response=demo.handle({'update_id':-1,'message':{'chat':{'id':int(client.chat),'type':'private'},'text':'/sample rassd'}})
+  result={'ready':True,'bot_username':verified['bot_username'],'facebook_data_requests':0,'sample_messages_sent':demo.sent,'delivered_type':'photo' if response and response[0].get('photo') else 'video' if response and response[0].get('video') else 'text','registered_commands':[x['command'] for x in configured]}
+  write_json(pathlib.Path(args.samples),samples)
   write_json(ROOT/'data/demo_smoke.json',result);print(json.dumps(result,ensure_ascii=False),flush=True);return
  started=now().timestamp();deadline=time.monotonic()+args.minutes*60;offset=0;processed=0
  print(json.dumps({'listening':True,'started_at':stamp(),'expires_at':expires,'facebook_data_requests':0,'public_private_chat_demo':True}),flush=True)

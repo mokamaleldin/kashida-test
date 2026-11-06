@@ -2,11 +2,12 @@ import pathlib,sqlite3,sys,unittest
 from unittest.mock import patch
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
 from telegram_demo import Demo
-from monitor import ROOT,read_json
+from monitor import ROOT,read_json,Telegram
 
 class FakeTelegram:
  def __init__(self):self.calls=[]
  def call(self,method,payload):self.calls.append((method,payload));return {'message_id':len(self.calls)}
+ def send(self,post,**kwargs):return Telegram.send(self,post,**kwargs)
 
 class DemoTests(unittest.TestCase):
  def setUp(self):
@@ -21,7 +22,7 @@ class DemoTests(unittest.TestCase):
   self.assertIn('/demo',self.client.calls[0][1]['text']);self.assertNotIn('فتح المنشور الأصلي',self.client.calls[0][1]['text'])
  def test_demo_one_saved_sample_per_source(self):
   result=self.demo.handle(self.incoming('/demo'));self.assertEqual(len(result),5)
-  for _,payload in self.client.calls:self.assertIn('عينة محفوظة للاختبار',payload['text']);self.assertIn('فتح المنشور الأصلي',payload['text'])
+  for _,payload in self.client.calls:self.assertNotIn('عينة محفوظة للاختبار',payload['text']);self.assertNotIn('مُعاد مشاركته',payload['text']);self.assertIn('فتح المنشور الأصلي',payload['text'])
   self.assertEqual(len({p['text'] for _,p in self.client.calls}),5)
  def test_same_update_not_delivered_twice(self):
   self.demo.handle(self.incoming('/demo'));self.demo.handle(self.incoming('/demo'));self.assertEqual(len(self.client.calls),5)
