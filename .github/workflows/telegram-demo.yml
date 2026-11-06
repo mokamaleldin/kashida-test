@@ -1,0 +1,52 @@
+name: Telegram demo commands
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Listen to demo commands for this many minutes; no Facebook calls'
+        type: choice
+        options: ['15', '30', '60']
+        default: '30'
+permissions:
+  contents: read
+concurrency:
+  group: telegram-demo-listener
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -q
+      - name: Register commands and send owner instructions only
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -u telegram_demo.py --smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-commands-check
+          path: data/demo_smoke.json
+          retention-days: 3
+  listen:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Listen for private chat commands
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEMO_MINUTES: ${{ inputs.minutes || '30' }}
+        run: python -u telegram_demo.py --minutes "$DEMO_MINUTES"
