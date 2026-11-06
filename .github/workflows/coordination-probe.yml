@@ -1,0 +1,45 @@
+name: Coordinated activity feasibility
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  analyze:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Test coordinated activity signals'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check -r requirements-coordination.txt
+      - run: python -m unittest discover -s tests -q
+      - name: Locate saved posts without source API calls
+        id: cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CAD_CACHE_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=demo-media-cache-v2&per_page=20" --jq '[.artifacts[] | select(.expired == false)] | first | .workflow_run.id // empty')
+          test -n "$CAD_CACHE_RUN" || { echo 'Existing post cache required; no new collection performed'; exit 1; }
+          printf 'run_id=%s\n' "$CAD_CACHE_RUN" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: demo-media-cache-v2
+          path: data
+          run-id: ${{ steps.cache.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Analyze text and up to eight existing public still-image URLs
+        run: python -u coordination_probe.py --images 8
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coordinated-activity-evidence
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            data/coordination_report.json
+            data/coordination_status.json
