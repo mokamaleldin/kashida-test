@@ -89,7 +89,7 @@ def normalize(post,source,collected_at):
     else:kind='unknown'
     published=parse_time(values.get('publish_time'))
     reactions=post.get('reactions') or {}
-    return {'source_id':source['id'],'source_name':source['name'],'id':str(ident),'url':url,'text':text,'published_at':stamp(published) if published else None,'time_origin':'provider.values.publish_time','time_semantics_verified':False,'collected_at':collected_at,'media_type':kind,'media':media,'media_download_available':any(m['type']==kind for m in media),'shared_post':bool(values.get('shared_post')),'reactions':number(reactions.get('total_reaction_count')),'comments':number(details.get('comments_count')),'shares':number(details.get('share_count')),'views':number(details.get('play_count'))}
+    return {'source_id':source['id'],'source_name':source['name'],'id':str(ident),'url':url,'text':text,'published_at':stamp(published) if published else None,'time_origin':'provider.values.publish_time','time_semantics_verified':False,'collected_at':collected_at,'media_type':kind,'media':media,'media_url_available':any(m['type']==kind for m in media),'shared_post':bool(values.get('shared_post')),'reactions':number(reactions.get('total_reaction_count')),'comments':number(details.get('comments_count')),'shares':number(details.get('share_count')),'views':number(details.get('play_count'))}
 
 def arabic(text):return re.sub(r'[\u064b-\u065f\u0670\u0640]','',text).replace('أ','ا').replace('إ','ا').replace('آ','ا').lower()
 def filter_post(post,filters,since=None):
@@ -188,7 +188,11 @@ def collect(db,sources,settings,token,request_cap=None):
     except ProbeError:summary['usage_verification_failed']=True
     summary['finished_at']=stamp();return summary
 
-def all_posts(db):return [json.loads(r['payload']) for r in db.execute('SELECT payload FROM posts ORDER BY last_seen DESC')]
+def all_posts(db):
+    rows=[json.loads(r['payload']) for r in db.execute('SELECT payload FROM posts ORDER BY last_seen DESC')]
+    for row in rows:
+        if 'media_url_available' not in row:row['media_url_available']=row.pop('media_download_available',False)
+    return rows
 
 def message(post):
     body=post.get('text') or 'منشور بدون نص'

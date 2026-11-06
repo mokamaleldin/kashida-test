@@ -14,14 +14,14 @@ function when(t){if(!t)return 'غير متاح';return new Date(t).toLocaleStrin
 function telegram(p){return p.source_name+'\nنوع المحتوى: '+names[p.media_type]+'\nوقت المصدر: '+when(p.published_at)+'\n\n'+(p.text||'منشور بدون نص')+'\n\n'+p.url}
 function render(){
  const source=$('source').value,type=$('type').value,include=norm($('include').value),exclude=norm($('exclude').value),age=Number($('age').value),min=Number($('reactions').value||0),available=$('available').value;
- const rows=DATA.posts.filter(p=>(!source||source===p.source_id)&&(!type||type===p.media_type)&&(!include||norm(p.text).includes(include))&&(!exclude||!norm(p.text).includes(exclude))&&(!age||(p.published_at&&Date.now()-Date.parse(p.published_at)<=age*60000))&&(!min||(p.reactions!==null&&p.reactions>=min))&&(!available||p.media_download_available)).sort((a,b)=>(b.published_at||'').localeCompare(a.published_at||''));
+ const rows=DATA.posts.filter(p=>(!source||source===p.source_id)&&(!type||type===p.media_type)&&(!include||norm(p.text).includes(include))&&(!exclude||!norm(p.text).includes(exclude))&&(!age||(p.published_at&&Date.now()-Date.parse(p.published_at)<=age*60000))&&(!min||(p.reactions!==null&&p.reactions>=min))&&(!available||p.media_url_available)).sort((a,b)=>(b.published_at||'').localeCompare(a.published_at||''));
  $('count').textContent=rows.length+' منشور مطابق للفلاتر';$('posts').replaceChildren();
  for(const p of rows){const card=el('article');card.append(el('h3',p.source_name+' · '+names[p.media_type]));card.append(el('div',when(p.published_at)+' · التفاعل: '+(p.reactions??'غير متاح')+' · التعليقات: '+(p.comments??'غير متاح'),'meta'));
  card.append(el('p',p.text||'لا يوجد نص في الاستجابة؛ افحص الوسائط أوالمنشور الأصلي.'));
  if(p.filter_reasons&&p.filter_reasons.length)card.append(el('p','ملاحظات الجمع: '+p.filter_reasons.join('، '),'warning'));
  const actions=el('div',undefined,'actions'),link=el('a','فتح المنشور الأصلي');link.href=urlSafe(p.url)||'#';link.target='_blank';link.rel='noopener noreferrer';actions.append(link);
  if(p.media.length){const b=el('button','عرض الوسائط المتاحة','secondary');b.onclick=()=>{b.disabled=true;for(const m of p.media){const u=urlSafe(m.url);if(!u)continue;const item=document.createElement(m.type==='video'?'video':'img');if(m.type==='video'){item.controls=true;item.preload='none'}else{item.loading='lazy';item.alt='وسائط المنشور'}item.src=u;item.onerror=()=>item.replaceWith(el('p','تعذر عرض الوسيط؛ قد يكون الرابط منتهيًا. استخدم رابط المنشور.','warning'));card.append(item)}};actions.append(b)}
- else if(['photo','video'].includes(p.media_type))actions.append(el('span','نوع الوسيط موجود لكن لا يوجد رابط مباشر صالح','meta'));
+ else if(['photo','video'].includes(p.media_type))actions.append(el('span',p.portable_preview?'الوسائط غير مضمنة في المعاينة؛ افتح المصدر':'نوع الوسيط موجود لكن لا يوجد رابط مباشر صالح','meta'));
  card.append(actions);const detail=el('details');detail.append(el('summary','معاينة رسالة Telegram'));detail.append(el('pre',telegram(p)));card.append(detail);$('posts').append(card)
  }if(!rows.length)$('posts').append(el('p','لا توجد نتائج مطابقة. جرّب توسيع الفترة أوتغيير الفلاتر.','empty'));
 }
