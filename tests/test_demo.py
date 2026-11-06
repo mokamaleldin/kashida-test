@@ -34,7 +34,7 @@ class DemoTests(unittest.TestCase):
   with patch('telegram_demo.time.time',return_value=131):self.demo.handle(self.incoming('/demo',3))
   self.assertEqual(len(self.client.calls),11)
  def test_removed_commands_do_not_send_news(self):
-  self.assertEqual([c['command'] for c in COMMANDS],['sources','demo'])
+  self.assertEqual([c['command'] for c in COMMANDS],['sources','demo','trends'])
   self.demo.handle(self.incoming('/cost',1));self.demo.handle(self.incoming('/sample rassd',2))
   self.assertEqual(len(self.client.calls),2)
   self.assertTrue(all('فتح المنشور الأصلي' not in payload['text'] for _,payload in self.client.calls))
@@ -54,6 +54,12 @@ class DemoTests(unittest.TestCase):
   self.assertIsNone(group_name({'user_details':{'name':'اسم الكاتب'}}))
  def test_groups_and_noncommands_ignored(self):
   self.demo.handle(self.incoming('/demo',1,'group'));self.demo.handle(self.incoming('hello',2));self.assertEqual(self.client.calls,[])
+ def test_trends_replays_cached_report_without_network_fetch(self):
+  from monitor import stamp
+  self.demo.trend_report={'created_at':stamp(),'sources':{'x':{'items':[{'name':'#اختبار','kind':'hashtag'}]}}}
+  with patch('trends_probe.fetch',side_effect=AssertionError('Replay must not fetch data')):
+   self.demo.handle(self.incoming('/trends'))
+  self.assertEqual(len(self.client.calls),1);self.assertIn('#اختبار',self.client.calls[0][1]['text'])
  def test_snapshot_has_no_group_bodies_or_direct_media(self):
   for p in self.demo.samples:
    self.assertEqual(p['media'],[])

@@ -1,6 +1,7 @@
 import datetime as dt,pathlib,sys,unittest
+from unittest.mock import patch
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
-from trends_probe import parse_public_x,parse_google,facebook_sample,render_messages
+from trends_probe import parse_public_x,parse_google,facebook_sample,render_messages,trial_enabled,digest_messages,collect_once
 from monitor import ProbeError,stamp,now
 
 def post(source='a',ident='1',text='منتخب مصر يستعد للمباراة #منتخب_مصر',age=1):
@@ -28,5 +29,15 @@ class TrendTests(unittest.TestCase):
  def test_external_topic_names_are_html_escaped(self):
   text=render_messages({'created_at':stamp(),'sources':{'x':{'items':[{'name':'<b>unsafe</b>','kind':'topic'}],'provider':'GetDayTrends'}}})[0]
   self.assertIn('&lt;b&gt;',text);self.assertNotIn('<b>unsafe',text)
+ def test_daily_trial_stops_at_configured_local_date(self):
+  self.assertTrue(trial_enabled(dt.datetime(2026,11,13,12,tzinfo=dt.timezone.utc)))
+  self.assertFalse(trial_enabled(dt.datetime(2026,11,13,22,tzinfo=dt.timezone.utc)))
+ def test_daily_digest_is_one_message_when_it_fits(self):
+  parts=digest_messages({'created_at':stamp(),'sources':{}});self.assertEqual(len(parts),1)
+ def test_malformed_api_secret_cannot_appear_in_error(self):
+  secret='private-value\nbad-line'
+  with patch.dict('os.environ',{'X_BEARER_TOKEN':secret}):
+   with self.assertRaises(ProbeError) as error:collect_once()
+  self.assertNotIn(secret,str(error.exception))
 
 if __name__=='__main__':unittest.main()

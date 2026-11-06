@@ -23,6 +23,7 @@ def fetch(url,headers=None):
    return body,response.status,response.headers.get('Content-Type','')
  except urllib.error.HTTPError as exc:raise ProbeError('HTTP '+str(exc.code)) from None
  except (urllib.error.URLError,TimeoutError):raise ProbeError('Network error') from None
+ except ValueError:raise ProbeError('Invalid request configuration') from None
 
 class PublicTrendTable(HTMLParser):
  def __init__(self):super().__init__();self.h1=False;self.country_title='';self.row=False;self.anchor=None;self.entries=[];self.tables=0
@@ -98,10 +99,12 @@ def facebook_sample(posts):
  hashtags.sort(key=lambda x:(-x['source_count'],-x['post_count'],x['name']))
  return {'platform':'Facebook','coverage':'selected_sources_sample','country_inference':'source_selection_only','cached_posts':len(rows),'posts_last_24h':len(recent),'sources':len({p['source_id'] for p in recent}),'last_collected_at':max((p.get('collected_at') or '' for p in rows),default=None),'hashtags':hashtags[:10],'repeated_phrases':selected,'growth_measured':False}
 
-def collect_once(cache_path=None):
+def collect_once(cache_path=None,probe_access=False):
  result={'created_at':stamp(),'country':'EG','socialapis_requests':0,'paid_api_requests':0,'sources':{},'probes':{}}
  token=(os.environ.get('X_BEARER_TOKEN') or '').strip()
+ if token and any(c.isspace() or not 33<=ord(c)<127 for c in token):raise ProbeError('Invalid X_BEARER_TOKEN format')
  if token:
+  result['paid_api_requests']=1
   try:
    raw,status,_=fetch(X_URL,{'Authorization':'Bearer '+token});data=json.loads(raw);items=data.get('data')
    if not isinstance(items,list):raise ProbeError('Unexpected official X trends schema')
@@ -116,7 +119,7 @@ def collect_once(cache_path=None):
  if cache_path and pathlib.Path(cache_path).exists():result['sources']['facebook']=facebook_sample(read_json(cache_path))
  else:result['sources']['facebook']={'error':'No Facebook cache available; no new data requested'}
  # A token-less probe checks the access requirement; it cannot incur authenticated charges.
- if not token:
+ if probe_access and not token:
   try:_,status,_=fetch(X_URL);result['probes']['official_x_unauthenticated']=status
   except ProbeError as exc:result['probes']['official_x_unauthenticated']=str(exc)
  return result
@@ -152,11 +155,21 @@ def render_messages(data):
  else:lines.append('تعذر جلب RSS؛ لا نعرض نتائج بديلة على أنها نتائج مصر.')
  messages.append('\n'.join(lines));return messages
 
+def digest_messages(data):
+ parts=render_messages(data);combined='\n\n'.join(parts)
+ return [combined] if utf16_units(combined)<=3900 else parts
+
+def trial_enabled(value=None):
+ # The product trial is bounded to seven future daily deliveries, not an indefinite job.
+ from zoneinfo import ZoneInfo
+ local=(value or now()).astimezone(ZoneInfo('Europe/Istanbul'))
+ return dt.date(2026,11,7)<=local.date()<=dt.date(2026,11,13)
+
 def main():
- p=argparse.ArgumentParser();p.add_argument('--cache',default=str(ROOT/'data/demo_media_samples.json'));p.add_argument('--send',action='store_true');args=p.parse_args()
- report=collect_once(args.cache);write_json(ROOT/'data/egypt_trends.json',report)
- brief=render_messages(report);write_json(ROOT/'data/trend_messages.json',brief)
- status={'created_at':report['created_at'],'socialapis_requests':0,'paid_api_requests':report['paid_api_requests'],'sources':{key:({'items':len(value.get('items',[])),'provider':value.get('provider'),'error':value.get('error')} if key!='facebook' else {k:value.get(k) for k in ['cached_posts','posts_last_24h','sources','error']}) for key,value in report['sources'].items()},'probes':report['probes'],'telegram_messages_sent':0}
+ p=argparse.ArgumentParser();p.add_argument('--cache',default=str(ROOT/'data/demo_media_samples.json'));p.add_argument('--send',action='store_true');p.add_argument('--probe-access',action='store_true');args=p.parse_args()
+ report=collect_once(args.cache,args.probe_access);write_json(ROOT/'data/egypt_trends.json',report)
+ brief=digest_messages(report);write_json(ROOT/'data/trend_messages.json',brief)
+ status={'created_at':report['created_at'],'socialapis_requests':0,'paid_api_requests':report['paid_api_requests'],'sources':{key:({'items':len(value.get('items',[])),'provider':value.get('provider'),'error':value.get('error')} if key!='facebook' else {**{k:value.get(k) for k in ['cached_posts','posts_last_24h','sources','error']},'hashtag_count':len(value.get('hashtags',[])),'repeated_phrase_count':len(value.get('repeated_phrases',[]))}) for key,value in report['sources'].items()},'probes':report['probes'],'telegram_messages_sent':0}
  if args.send:
   client=Telegram(os.environ.get('TELEGRAM_BOT_TOKEN'),os.environ.get('TELEGRAM_CHAT_ID'))
   if client.verify().get('bot_username')!='test_kashida_bot':raise ProbeError('Unexpected bot')
@@ -166,6 +179,7 @@ def main():
    if not response.get('message_id'):raise ProbeError('Telegram acknowledgement missing')
    status['telegram_messages_sent']+=1;time.sleep(1.3)
  write_json(ROOT/'data/trends_status.json',status);print(json.dumps(status,ensure_ascii=False,indent=2),flush=True)
+ if not any(value.get('items') for value in report['sources'].values()) and not report['sources'].get('facebook',{}).get('posts_last_24h'):raise SystemExit(1)
 if __name__=='__main__':
  try:main()
  except ProbeError as exc:print('Stopped: '+str(exc));raise SystemExit(1)

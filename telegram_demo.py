@@ -4,7 +4,7 @@ from monitor import ROOT,Telegram,ProbeError,TransportError,now,stamp,format_tim
 import datetime as dt
 
 COMMANDS=[{'command':c,'description':d} for c,d in [
- ('sources','المصادر المتاحة'),('demo','عرض كل المنشورات المحفوظة من جميع المصادر')]]
+ ('sources','المصادر المتاحة'),('demo','عرض كل المنشورات المحفوظة من جميع المصادر'),('trends','نشرة موضوعات وهاشتاجات مصر')]]
 
 def ordered_posts(posts,sources):
  unique={}
@@ -16,8 +16,9 @@ def ordered_posts(posts,sources):
  return sorted(rows,key=lambda p:order.get(p['source_id'],len(order)))
 
 class Demo:
- def __init__(self,client,sources,samples,db,expires_at):
+ def __init__(self,client,sources,samples,db,expires_at,trend_report=None):
   self.client=client;self.sources=sources;self.samples=ordered_posts(samples,sources);self.db=db;self.expires_at=expires_at;self.sent=0;self.last_send=0
+  self.trend_report=trend_report
   db.executescript('CREATE TABLE IF NOT EXISTS handled(update_id INTEGER PRIMARY KEY); CREATE TABLE IF NOT EXISTS demo_requests(chat_id TEXT PRIMARY KEY,at REAL);')
  def deliver(self,method,payload):
   if self.sent>=100:raise ProbeError('Demo message budget exhausted')
@@ -33,7 +34,7 @@ class Demo:
   return self.deliver('sendMessage',{'chat_id':str(chat),'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
  def help(self):
   return ('<b>تجربة كشيدة لرصد Facebook</b>\n\n'
-   '/sources — المصادر المتاحة\n/demo — كل المنشورات المحفوظة من جميع المصادر\n\n'
+   '/sources — المصادر المتاحة\n/demo — كل المنشورات المحفوظة من جميع المصادر\n/trends — نشرة موضوعات وهاشتاجات مصر\n\n'
    'يعرض /demo المنشورات مرتبة حسب المصدر، مع نص الخبر والصورة أوالفيديو المتاح ورابط الأصل. '
    'اكتب /demo مرة أخرى لإعادة عرضها. المنشورات محفوظة من آخر سحبة؛ الأمر لا يجلب أخبارًا جديدة.\n\n'
    'جلسة استقبال الأوامر الحالية حتى '+format_timestamp(self.expires_at)+'.')
@@ -46,6 +47,10 @@ class Demo:
   self.db.execute('INSERT INTO handled VALUES(?)',(mid,));self.db.commit()
   args=text.strip().split();cmd=args[0].lower().split('@')[0];cid=str(chat['id'])
   if cmd in ['/start','/help']:return [self.send(cid,self.help())]
+  if cmd=='/trends':
+   if not self.trend_report:return [self.send(cid,'نشرة الترندات غير متاحة في هذه الجلسة بعد.')]
+   from trends_probe import digest_messages
+   return [self.send(cid,text) for text in digest_messages(self.trend_report)]
   if cmd in ['/sources','/source']:
    lines=['<b>المصادر المتاحة</b>']
    for source in self.sources:
@@ -53,7 +58,7 @@ class Demo:
     lines.append('<a href="'+html.escape(source['url'],quote=True)+'">'+html.escape(source['name'])+'</a> — '+str(count)+' منشورات محفوظة')
    lines.append('\n/demo لعرض جميع المنشورات.')
    return [self.send(cid,'\n'.join(lines))]
-  if cmd!='/demo':return [self.send(cid,'الأوامر المتاحة: /sources للمصادر و/demo لعرض جميع المنشورات.')]
+  if cmd!='/demo':return [self.send(cid,'الأوامر المتاحة: /sources للمصادر و/demo للمنشورات و/trends لنشرة الترندات.')]
   chosen=self.samples
   if not chosen:return [self.send(cid,'لا توجد منشورات محفوظة بعد.')]
   last=self.db.execute('SELECT at FROM demo_requests WHERE chat_id=?',(cid,)).fetchone()
@@ -75,12 +80,13 @@ def main():
  sources=read_json(source_cache) if source_cache.exists() else read_json(ROOT/'sources.json')
  samples=read_json(args.samples) if pathlib.Path(args.samples).exists() else read_json(ROOT/'demo_samples.json')
  expires=stamp(now()+dt.timedelta(minutes=args.minutes));db=sqlite3.connect(ROOT/'data/demo.sqlite')
- demo=Demo(client,sources,samples,db,expires)
+ trend_path=ROOT/'data/egypt_trends.json';trend_report=read_json(trend_path) if trend_path.exists() else None
+ demo=Demo(client,sources,samples,db,expires,trend_report)
  if args.smoke:
   if client.call('setMyCommands',{'commands':COMMANDS}) is not True:raise ProbeError('Command registration failed')
   configured=client.call('getMyCommands')
-  response=demo.handle({'update_id':-1,'message':{'chat':{'id':int(client.chat),'type':'private'},'text':'/sources'}})
-  result={'ready':True,'bot_username':verified['bot_username'],'facebook_data_requests':0,'source_list_messages_sent':demo.sent,'cached_posts':len(demo.samples),'source_names':[s['name'] for s in sources],'registered_commands':[x['command'] for x in configured]}
+  response=demo.handle({'update_id':-1,'message':{'chat':{'id':int(client.chat),'type':'private'},'text':'/trends' if trend_report else '/start'}})
+  result={'ready':True,'bot_username':verified['bot_username'],'facebook_data_requests':0,'owner_check_messages_sent':demo.sent,'cached_posts':len(demo.samples),'source_names':[s['name'] for s in sources],'trend_command_verified':bool(trend_report),'registered_commands':[x['command'] for x in configured]}
   write_json(pathlib.Path(args.samples),samples)
   write_json(ROOT/'data/demo_smoke.json',result);print(json.dumps(result,ensure_ascii=False),flush=True);return
  started=now().timestamp();deadline=time.monotonic()+args.minutes*60;offset=0;processed=0

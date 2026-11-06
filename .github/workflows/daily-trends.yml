@@ -1,0 +1,65 @@
+name: Daily Egypt trends trial
+on:
+  workflow_dispatch:
+  schedule:
+    # Seven trial deliveries, Nov 7-13 2026, approximately 09:17 Europe/Istanbul.
+    - cron: '17 6 7-13 11 *'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: daily-egypt-trend-digest
+  cancel-in-progress: false
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Respect bounded trial dates
+        id: trial
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from trends_probe import trial_enabled
+          enabled=os.environ['EVENT_NAME']=='workflow_dispatch' or trial_enabled()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('enabled='+str(enabled).lower()+'\n')
+          print('Daily trial enabled:',enabled)
+          PY
+      - name: Find existing Facebook cache without collection
+        if: steps.trial.outputs.enabled == 'true'
+        id: cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TREND_CACHE_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=demo-media-cache-v2&per_page=20" --jq '[.artifacts[] | select(.expired == false)] | first | .workflow_run.id // empty')
+          printf 'run_id=%s\n' "$TREND_CACHE_RUN" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        if: steps.trial.outputs.enabled == 'true' && steps.cache.outputs.run_id != ''
+        with:
+          name: demo-media-cache-v2
+          path: data
+          run-id: ${{ steps.cache.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Send one daily digest when it fits Telegram limits
+        if: steps.trial.outputs.enabled == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+        run: python -u trends_probe.py --send
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.trial.outputs.enabled == 'true'
+        with:
+          name: egypt-trend-results
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            data/egypt_trends.json
+            data/trends_status.json
+            data/trend_messages.json
