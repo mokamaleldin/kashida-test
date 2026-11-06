@@ -24,6 +24,9 @@ class DemoTests(unittest.TestCase):
  def test_start_only_instructions_not_news(self):
   result=self.demo.handle(self.incoming('/start'));self.assertEqual(len(result),1)
   self.assertIn('/demo',self.client.calls[0][1]['text']);self.assertNotIn('فتح المنشور الأصلي',self.client.calls[0][1]['text'])
+ def test_plain_start_opens_help_and_shows_session_end(self):
+  result=self.demo.handle(self.incoming(' Start '));self.assertEqual(len(result),1)
+  text=self.client.calls[0][1]['text'];self.assertIn('/demo',text);self.assertIn('جلسة التجربة حتى',text)
  def test_demo_one_saved_sample_per_source(self):
   result=self.demo.handle(self.incoming('/demo'));self.assertEqual(len(result),5)
   for _,payload in self.client.calls:self.assertNotIn('عينة محفوظة للاختبار',payload['text']);self.assertNotIn('مُعاد مشاركته',payload['text']);self.assertIn('فتح المنشور الأصلي',payload['text'])

@@ -8,7 +8,7 @@ on:
         description: 'Listen to demo commands for this many minutes'
         type: choice
         options: ['15', '30', '60']
-        default: '30'
+        default: '60'
       refresh_samples:
         description: 'Refresh posts and group names once (up to 7 credits); otherwise reuse cache'
         type: boolean
@@ -18,10 +18,10 @@ permissions:
   actions: read
 concurrency:
   group: telegram-demo-listener
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' || contains(fromJSON('["Start 30-minute Telegram demo","Update Telegram media demo","Show all collected Telegram posts","Enable Egypt trends bot","Simplify trends and speed up demo"]'), github.event.head_commit.message) }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' || contains(fromJSON('["Start 30-minute Telegram demo","Update Telegram media demo","Show all collected Telegram posts","Enable Egypt trends bot","Simplify trends and speed up demo","Restart Telegram demo for 60 minutes"]'), github.event.head_commit.message) }}
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo' || github.event.head_commit.message == 'Show all collected Telegram posts' || github.event.head_commit.message == 'Enable Egypt trends bot' || github.event.head_commit.message == 'Simplify trends and speed up demo'
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo' || github.event.head_commit.message == 'Show all collected Telegram posts' || github.event.head_commit.message == 'Enable Egypt trends bot' || github.event.head_commit.message == 'Simplify trends and speed up demo' || github.event.head_commit.message == 'Restart Telegram demo for 60 minutes'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -45,6 +45,11 @@ jobs:
           fi
           printf 'run_id=%s\n' "$DEMO_CACHE_RUN" >> "$GITHUB_OUTPUT"
           printf 'cache_name=%s\n' "$DEMO_CACHE_NAME" >> "$GITHUB_OUTPUT"
+      - name: Keep this restart within saved data
+        if: github.event.head_commit.message == 'Restart Telegram demo for 60 minutes' && (steps.cache.outputs.run_id == '' || steps.cache.outputs.cache_name != 'demo-media-cache-v2')
+        run: |
+          echo 'Saved media cache unavailable; stopping without collecting Facebook again.'
+          exit 1
       - uses: actions/download-artifact@v4
         if: steps.cache.outputs.run_id != ''
         with:
@@ -117,5 +122,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DEMO_MINUTES: ${{ inputs.minutes || '30' }}
+          DEMO_MINUTES: ${{ inputs.minutes || '60' }}
         run: python -u telegram_demo.py --minutes "$DEMO_MINUTES"

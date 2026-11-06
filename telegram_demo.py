@@ -72,9 +72,12 @@ class Demo:
  def send(self,chat,text):
   return self.deliver('sendMessage',{'chat_id':str(chat),'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
  def help(self):
-  return ('<b>كشيدة</b>\n\n/sources — المصادر\n/demo — كل المنشورات بالصور\n/trends — ترندات مصر')
+  return ('<b>كشيدة</b>\n\n/sources — المصادر\n/demo — كل المنشورات بالصور\n/trends — ترندات مصر\n\nجلسة التجربة حتى '+html.escape(format_timestamp(self.expires_at)))
  def handle(self,update):
   mid=update.get('update_id');m=update.get('message') or {};chat=m.get('chat') or {};text=m.get('text') or ''
+  if isinstance(text,str):
+   text=text.strip()
+   if text.lower()=='start':text='/start'
   if not isinstance(mid,int) or chat.get('type')!='private' or (m.get('from') or {}).get('is_bot') or not isinstance(text,str) or not text.startswith('/'):return
   if not isinstance(chat.get('id'),int):return
   if self.db.execute('SELECT 1 FROM handled WHERE update_id=?',(mid,)).fetchone():return
@@ -102,7 +105,7 @@ class Demo:
   return self.send_posts(cid,chosen)
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--minutes',type=int,choices=[15,30,60],default=30);p.add_argument('--smoke',action='store_true');p.add_argument('--samples',default=str(ROOT/'data/demo_media_samples.json'));args=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--minutes',type=int,choices=[15,30,60],default=60);p.add_argument('--smoke',action='store_true');p.add_argument('--samples',default=str(ROOT/'data/demo_media_samples.json'));args=p.parse_args()
  token=os.environ.get('TELEGRAM_BOT_TOKEN');chat=os.environ.get('TELEGRAM_CHAT_ID')
  if not token or not chat:raise ProbeError('Telegram secrets missing')
  client=Telegram(token,chat);verified=client.verify()
@@ -145,7 +148,7 @@ def main():
    if (update.get('message') or {}).get('date',0)<started-30:continue
    replies=demo.handle(update)
    if replies:processed+=1;print(json.dumps({'commands_responded':processed,'messages_sent':demo.sent,'facebook_data_requests':0}),flush=True)
- print(json.dumps({'listening':False,'messages_sent':demo.sent,'facebook_data_requests':0,'reason':'session_or_message_budget_finished'}),flush=True);db.close()
+ print(json.dumps({'listening':False,'messages_sent':demo.sent,'facebook_data_requests':0,'reason':'message_budget_finished' if demo.sent>=100 else 'session_expired'}),flush=True);db.close()
 
 if __name__=='__main__':
  (ROOT/'data').mkdir(exist_ok=True)
