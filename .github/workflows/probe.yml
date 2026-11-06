@@ -1,0 +1,60 @@
+name: Manual Facebook probe
+on:
+  workflow_dispatch:
+    inputs:
+      max_calls:
+        description: 'Maximum data API calls (1-5)'
+        type: choice
+        options: ['1', '2', '3', '5']
+        default: '5'
+      lookback:
+        description: 'Requested lookback in minutes'
+        type: choice
+        options: ['30', '60', '180']
+        default: '60'
+      send_telegram:
+        description: 'Send at most ONE eligible post to the configured Telegram chat'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: manual-facebook-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify offline checks
+        run: python -m unittest discover -s tests -v
+      - name: Run bounded collection
+        env:
+          SOCIALAPIS_API_KEY: ${{ secrets.SOCIALAPIS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MAX_CALLS: ${{ inputs.max_calls }}
+          LOOKBACK: ${{ inputs.lookback }}
+          SEND_TELEGRAM: ${{ inputs.send_telegram }}
+        run: |
+          test -n "$SOCIALAPIS_API_KEY" || { echo 'Missing SOCIALAPIS_API_KEY secret'; exit 1; }
+          if [ "$SEND_TELEGRAM" = 'true' ]; then
+            python monitor.py collect --max-calls "$MAX_CALLS" --lookback "$LOOKBACK" --send --max-messages 1
+          else
+            python monitor.py collect --max-calls "$MAX_CALLS" --lookback "$LOOKBACK"
+          fi
+          python export_preview.py
+      - name: Save safe preview and usage summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-probe-preview
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            data/last_run.json
+            data/preview.html

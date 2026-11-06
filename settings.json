@@ -1,0 +1,8 @@
+{
+  "interval_minutes":30,
+  "lookback_minutes":60,
+  "limit":3,
+  "max_calls_per_run":5,
+  "monthly_credit_cap":100,
+  "filters":{"media_types":["text","photo","video","link","unknown"],"include_any":[],"exclude_any":[],"minimum_reactions":0,"require_text":false}
+}
