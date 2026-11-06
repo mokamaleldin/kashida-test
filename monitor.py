@@ -199,7 +199,10 @@ def message(post):
     return f"{post['source_name']}\nنوع المحتوى: {post['media_type']}\nوقت المصدر: {post.get('published_at') or 'غير متاح'}\n\n{body[:2800]}\n\n{post['url']}"
 
 class Telegram:
-    def __init__(self,token,chat):self.token=token;self.chat=str(chat)
+    def __init__(self,token,chat):
+        self.token=str(token).strip();self.chat=str(chat).strip()
+        if not re.fullmatch(r'\d{6,15}:[A-Za-z0-9_-]{20,}',self.token):raise ProbeError('Invalid Telegram token format; use only the BotFather token')
+        if not re.fullmatch(r'-?\d{1,20}',self.chat):raise ProbeError('Invalid Telegram chat id format; use only the numeric chat id')
     def call(self,method,payload=None):
         try:data,_=request_json('https://api.telegram.org/bot'+self.token+'/'+method,payload=payload or {})
         except TransportError:raise

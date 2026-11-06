@@ -60,6 +60,14 @@ class MonitorTests(unittest.TestCase):
    collect(self.db,[SOURCE],{},'test',1)
    query=urllib.parse.parse_qs(urllib.parse.urlsplit(network.call_args.args[0]).query)
    self.assertRegex(query['after_time'][0],r'^\d{4}-\d{2}-\d{2}$')
+ def test_telegram_credentials_trim_copy_paste_whitespace(self,usage_mock):
+  token='123456789:unit_test_token_has_more_than_20_chars'
+  client=Telegram(' \n'+token+'\n',' 1234567890\n')
+  self.assertEqual(client.token,token);self.assertEqual(client.chat,'1234567890')
+ def test_telegram_invalid_token_error_does_not_echo_secret(self,usage_mock):
+  bad='invalid secret value\ninside'
+  with self.assertRaises(ProbeError) as error:Telegram(bad,'1234567890')
+  self.assertNotIn(bad,str(error.exception));self.assertIn('token format',str(error.exception))
  def test_cost_does_not_invent_enterprise_price(self,usage_mock):
   self.assertEqual(costs(60,30)['credits'],86400);self.assertEqual(costs(60,30)['plan']['monthly_usd'],179);self.assertIsNone(costs(60,15)['plan']);self.assertEqual(costs(60,30,2)['credits'],172800)
 if __name__=='__main__':unittest.main()
