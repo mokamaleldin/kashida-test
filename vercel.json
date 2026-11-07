@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/telegram.py": {
+      "maxDuration": 300,
+      "includeFiles": "{monitor.py,telegram_demo.py,webhook_service.py,trends_probe.py,topic_links.py}"
+    }
+  },
+  "regions": ["fra1"]
+}

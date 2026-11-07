@@ -72,7 +72,8 @@ class Demo:
  def send(self,chat,text):
   return self.deliver('sendMessage',{'chat_id':str(chat),'text':text,'parse_mode':'HTML','link_preview_options':{'is_disabled':True}})
  def help(self):
-  return ('<b>كشيدة</b>\n\n/sources — المصادر\n/demo — كل المنشورات بالصور\n/trends — ترندات مصر\n\nجلسة التجربة حتى '+html.escape(format_timestamp(self.expires_at)))
+  text='<b>كشيدة</b>\n\n/sources — المصادر\n/demo — كل المنشورات بالصور\n/trends — ترندات مصر'
+  return text+('\n\nجلسة التجربة حتى '+html.escape(format_timestamp(self.expires_at)) if self.expires_at else '')
  def handle(self,update):
   mid=update.get('update_id');m=update.get('message') or {};chat=m.get('chat') or {};text=m.get('text') or ''
   if isinstance(text,str):
