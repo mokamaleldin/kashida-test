@@ -25,7 +25,7 @@ class handler(BaseHTTPRequestHandler):
   token=os.environ.get('TELEGRAM_BOT_TOKEN','').strip();secret=os.environ.get('WEBHOOK_SECRET','')
   if not token or not secret:return self.reply(503,{'ok':False,'error':'configuration_missing'})
   action=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('admin',[''])[0]
-  admin=action in ['smoke','configure']
+  admin=action in ['smoke','configure','status']
   if admin:
    valid=authorized(self.headers.get('Authorization'), 'Bearer '+token)
   else:valid=authorized(self.headers.get('X-Telegram-Bot-Api-Secret-Token'),secret)
@@ -48,6 +48,7 @@ class handler(BaseHTTPRequestHandler):
     client.call('setMyCommands',{'commands':COMMANDS});info=client.call('getWebhookInfo')
     return self.reply(200,{'ok':bool(configured) and info.get('url')==url,'webhook_url':info.get('url'),'pending_updates':info.get('pending_update_count'),'facebook_data_requests':0})
    store=Store();client=Telegram(token,os.environ.get('TELEGRAM_CHAT_ID','0'))
+   if action=='status':return self.reply(200,{'ok':True,'recent_demo_messages':store.recent_demo_messages(),'facebook_data_requests':0})
    result=process(update,store,client)
    print(json.dumps({'event':'telegram_webhook','admin_smoke':admin,**result}),flush=True)
    self.reply(200,result)

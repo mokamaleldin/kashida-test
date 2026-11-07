@@ -18,6 +18,9 @@ class Store:
   return self.db.execute("INSERT INTO telegram_cooldowns(chat_hash) VALUES(%s) ON CONFLICT(chat_hash) DO UPDATE SET requested_at=now() WHERE telegram_cooldowns.requested_at<=now()-interval '30 seconds' RETURNING chat_hash",(chat_hash,)).fetchone() is not None
  def finish(self,ident,count,status='sent'):
   self.db.execute('UPDATE telegram_updates SET status=%s,messages=%s WHERE update_id=%s',(status,count,ident))
+ def recent_demo_messages(self):
+  row=self.db.execute("SELECT coalesce(max(messages),0) FROM telegram_updates WHERE command='/demo' AND status='sent' AND created_at>now()-interval '30 minutes'").fetchone()
+  return row[0]
 
 def authorized(provided,expected):
  return isinstance(provided,str) and bool(expected) and hmac.compare_digest(provided.encode(),expected.encode())
