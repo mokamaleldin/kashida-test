@@ -21,7 +21,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' || contains(fromJSON('["Start 30-minute Telegram demo","Update Telegram media demo","Show all collected Telegram posts","Enable Egypt trends bot","Simplify trends and speed up demo","Restart Telegram demo for 60 minutes"]'), github.event.head_commit.message) }}
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Start 30-minute Telegram demo' || github.event.head_commit.message == 'Update Telegram media demo' || github.event.head_commit.message == 'Show all collected Telegram posts' || github.event.head_commit.message == 'Enable Egypt trends bot' || github.event.head_commit.message == 'Simplify trends and speed up demo' || github.event.head_commit.message == 'Restart Telegram demo for 60 minutes'
+    # The saved demo is served by a persistent Vercel webhook. Never start a competing poller.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

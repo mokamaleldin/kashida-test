@@ -1,0 +1,30 @@
+name: Activate persistent Telegram demo
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: telegram-webhook-setup
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Activate persistent Telegram demo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -q
+      - name: Verify the hosted saved demo and configure Telegram webhook
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python -u activate_webhook.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: persistent-demo-proof
+          path: data/permanent_demo_proof.json
+          retention-days: 14
